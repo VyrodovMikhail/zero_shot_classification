@@ -1,0 +1,2 @@
+geracl: geracl-service:latest
+qwen/Qwen3-0.6B: llm-service:latest
