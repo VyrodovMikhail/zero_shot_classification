@@ -1,7 +1,7 @@
 # Zero‑Shot Text‑Classification Cluster
 
 This repository contains **scripts and templates** that let you spin‑up a multi‑GPU / multi‑host zero‑shot classification service.
-All external traffic always hits **one public URL**; internally the requests are weighted across any number of LLM and **Geracl** model replicas.
+All external traffic always hits **one public URL**; internally the requests are weighted across any number of LLM and [GeRaCl](https://huggingface.co/deepvk/GeRaCl-USER2-base) model replicas.
 
 ---
 
@@ -98,7 +98,7 @@ All public traffic now lands on **port 80** (or 443 if you terminate TLS).
 Send every classification request to the **same URL** — Nginx will weight‑shift it to the fastest backend.
 
 ```bash
-curl -X POST http://your-domain.com/classify \
+curl -X POST http://your-ip:your-port/classify \
      -H "Content-Type: application/json"      \
      -d '{
            "texts" : [
@@ -121,3 +121,54 @@ curl -X POST http://your-domain.com/classify \
 ```
 
 The caller never needs to know which model or GPU produced each answer.
+
+---
+
+## 5 · Observability with OpenTelemetry
+
+The FastAPI apps are instrumented with OpenTelemetry. To gather traces and metrics
+run an OpenTelemetry Collector and point the services at it.
+
+### 5.1  Start a collector
+
+```bash
+docker run -p 4317:4317 -p 4318:4318 otel/opentelemetry-collector:latest
+```
+
+### 5.2  Generate compose files with telemetry enabled
+
+```bash
+python scripts/generate_compose.py \
+       --cluster cluster.json \
+       --images  images.yaml \
+       --base-port 8100 \
+       --otel-endpoint http://collector-host:4317
+```
+
+Each service will export spans and metrics to the collector using OTLP.
+
+### 5.3  Visualize traces
+
+Run Jaeger and configure the collector to send data to it:
+
+```bash
+docker run -p 16686:16686 jaegertracing/all-in-one
+```
+
+Open `http://localhost:16686` in a browser to explore spans produced by the model
+services. Metrics can be scraped from the collector or forwarded to another
+backend such as Prometheus.
+
+---
+
+## 6 Testing a running service
+
+A helper script `scripts/test_api.py` sends a few examples from the
+[`ai-forever/headline-classification`](https://huggingface.co/datasets/ai-forever/headline-classification)
+dataset to any deployed service.
+
+```bash
+python scripts/test_api.py http://localhost:8100 --limit 5
+```
+
+The script will print the model's predictions for each text in the dataset.

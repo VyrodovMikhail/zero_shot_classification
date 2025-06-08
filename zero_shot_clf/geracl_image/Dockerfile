@@ -1,6 +1,7 @@
 FROM nvcr.io/nvidia/pytorch:24.12-py3
 
-RUN pip3 install transformers fastapi uvicorn[standard] opentelemetry-instrumentation-fastapi
+RUN pip3 install transformers fastapi uvicorn[standard] \
+    opentelemetry-instrumentation-fastapi opentelemetry-sdk opentelemetry-exporter-otlp
 
 RUN pip3 install --no-cache-dir \
         "git+https://github.com/deepvk/geracl.git@main"

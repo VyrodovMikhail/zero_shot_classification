@@ -26,13 +26,25 @@ def expand(spec: str):
     return list(range(a, b + 1))
 
 
-def make_service(model, image, gpu, external_port):
+def make_service(model, image, gpu, external_port, otel_endpoint=None, otel_protocol="grpc"):
     """
     Returns a YAML snippet describing the service.
     • Inside the container FastAPI listens on 8000/tcp,
       external_port is exposed on the host.
     """
     svc_name = f"{model.split('/')[-1].replace('.', '-')}-gpu{gpu}"
+    env = [f"MODEL_ID={model}", "HUGGINGFACE_HUB_TOKEN=/run/secrets/hf_token"]
+    if otel_endpoint:
+        env.extend(
+            [
+                f"OTEL_EXPORTER_OTLP_ENDPOINT={otel_endpoint}",
+                f"OTEL_EXPORTER_OTLP_PROTOCOL={otel_protocol}",
+                f"OTEL_SERVICE_NAME={svc_name}",
+                "OTEL_TRACES_EXPORTER=otlp",
+                "OTEL_METRICS_EXPORTER=otlp",
+            ]
+        )
+
     return svc_name, {
         "image": image,
         "container_name": svc_name,
@@ -51,7 +63,7 @@ def make_service(model, image, gpu, external_port):
                 }
             }
         },
-        "environment": [f"MODEL_ID={model}"],
+        "environment": env,
     }
 
 
@@ -60,6 +72,8 @@ def main():
     ap.add_argument("--cluster", required=True, help="cluster.json")
     ap.add_argument("--images", required=True, help="images.yaml")
     ap.add_argument("--base-port", type=int, default=8100, help="first external port")
+    ap.add_argument("--otel-endpoint", help="OTLP collector endpoint")
+    ap.add_argument("--otel-protocol", default="grpc", help="OTLP protocol")
     args = ap.parse_args()
 
     cluster = json.loads(Path(args.cluster).read_text())
@@ -67,6 +81,7 @@ def main():
 
     for server, devices in cluster.items():
         compose = {"version": "3.9", "services": {}}
+        compose["secrets"] = {"hf_token": {"file": "./hf_token.txt"}}
         port = args.base_port
         for gpu_spec, model in devices.items():
             image = images.get(model)
@@ -74,7 +89,14 @@ def main():
                 print(f"No docker image found for model {model}")
                 continue
             for gpu in expand(gpu_spec):
-                svc_name, svc_def = make_service(model, image, gpu, port)
+                svc_name, svc_def = make_service(
+                    model,
+                    image,
+                    gpu,
+                    port,
+                    args.otel_endpoint,
+                    args.otel_protocol,
+                )
                 compose["services"][svc_name] = svc_def
                 port += 1
 
